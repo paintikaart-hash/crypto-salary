@@ -557,8 +557,8 @@ async function bybit(path, params = {}) {
   // Route through server proxy to avoid timestamp drift and CORS issues.
   // The proxy signs requests with the server's correct clock.
   const PROXY = 'http://217.160.164.8:3001';
-  const qs = new URLSearchParams(params).toString();
-  const res = await fetch(`${PROXY}/bybit${path}?${qs}`);
+  const qs = new URLSearchParams({path, ...params}).toString();
+  const res = await fetch(`${PROXY}/bybit?${qs}`);
   const d = await res.json();
   if (d.retCode !== 0) throw new Error(d.retMsg);
   return d.result;
