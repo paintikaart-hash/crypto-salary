@@ -554,18 +554,11 @@ async function hmac(secret, msg) {
 }
 
 async function bybit(path, params = {}) {
-  const ts = Date.now().toString();
-  const rw = '5000';
+  // Route through server proxy to avoid timestamp drift and CORS issues.
+  // The proxy signs requests with the server's correct clock.
+  const PROXY = 'http://217.160.164.8:3001';
   const qs = new URLSearchParams(params).toString();
-  const sig = await hmac(SEC, `${ts}${KEY}${rw}${qs}`);
-  const res = await fetch(`https://api.bybit.com${path}?${qs}`, {
-    headers: {
-      'X-BAPI-API-KEY': KEY,
-      'X-BAPI-SIGN': sig,
-      'X-BAPI-TIMESTAMP': ts,
-      'X-BAPI-RECV-WINDOW': rw,
-    }
-  });
+  const res = await fetch(`${PROXY}/bybit${path}?${qs}`);
   const d = await res.json();
   if (d.retCode !== 0) throw new Error(d.retMsg);
   return d.result;
