@@ -478,6 +478,20 @@ select.cfg-input {
   animation: blink 1.2s infinite;
 }
 
+.hide-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.hide-btn:hover { border-color: var(--red); color: var(--red); }
+
 .chart-btn {
   background: none;
   border: 1px solid var(--border);
@@ -822,6 +836,23 @@ async function loadTrades() {
   }
 }
 
+// ── HIDDEN TRADES ──
+const HIDDEN_KEY = 'cs_hidden_trades';
+function getHidden() {
+  try { return JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]'); }
+  catch { return []; }
+}
+function hideTradeId(id) {
+  const h = getHidden();
+  if (!h.includes(id)) { h.push(id); localStorage.setItem(HIDDEN_KEY, JSON.stringify(h)); }
+  loadJournal();
+  loadAnalyse();
+}
+function getVisibleTrades(trades) {
+  const h = getHidden();
+  return trades.filter(t => !h.includes(t.orderId || t.createdTime));
+}
+
 // ── JOURNAL ──
 async function loadJournal() {
   hideErr('err-j');
@@ -837,22 +868,41 @@ async function loadJournal() {
       return;
     }
 
-    document.getElementById('jnl-wrap').innerHTML = trades.map(t => {
-      const pnl = parseFloat(t.closedPnl||0);
-      const isL = t.side === 'Buy';
-      return `<div class="card">
-        <div class="card-top">
-          <span class="card-sym">${t.symbol}</span>
-          <span class="card-pnl ${pc(pnl)}">${pnl>=0?'+':''}${pnl.toFixed(4)} USDT</span>
-        </div>
-        <div class="card-row">
-          <div><div class="card-label">Side</div><div class="card-val ${isL?'g':'r'}">${isL?'▲ LONG':'▼ SHORT'}</div></div>
-          <div><div class="card-label">Entry</div><div class="card-val">${fp(t.avgEntryPrice)}</div></div>
-          <div><div class="card-label">Exit</div><div class="card-val">${fp(t.avgExitPrice)}</div></div>
-        </div>
-        <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;">${ft(t.updatedTime)}</div>
-      </div>`;
-    }).join('');
+    const visible = getVisibleTrades(trades);
+    const hiddenCount = trades.length - visible.length;
+
+    if (!visible.length) {
+      document.getElementById('jnl-wrap').innerHTML = '<div class="empty">KEINE ABGESCHLOSSENEN TRADES</div>';
+    } else {
+      document.getElementById('jnl-wrap').innerHTML = visible.map(t => {
+        const pnl = parseFloat(t.closedPnl||0);
+        const isL = t.side === 'Buy';
+        const tid = t.orderId || t.createdTime;
+        return `<div class="card">
+          <div class="card-top">
+            <span class="card-sym">${t.symbol}</span>
+            <span class="card-pnl ${pc(pnl)}">${pnl>=0?'+':''}${pnl.toFixed(4)} USDT</span>
+          </div>
+          <div class="card-row">
+            <div><div class="card-label">Side</div><div class="card-val ${isL?'g':'r'}">${isL?'▲ LONG':'▼ SHORT'}</div></div>
+            <div><div class="card-label">Entry</div><div class="card-val">${fp(t.avgEntryPrice)}</div></div>
+            <div><div class="card-label">Exit</div><div class="card-val">${fp(t.avgExitPrice)}</div></div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+            <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">${ft(t.updatedTime)}</span>
+            <button class="hide-btn" onclick="hideTradeId('${tid}')">✕ AUSBLENDEN</button>
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    if (hiddenCount > 0) {
+      document.getElementById('jnl-wrap').innerHTML +=
+        `<div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);text-align:center;margin-top:8px;">
+          ${hiddenCount} Trade(s) ausgeblendet ·
+          <span style="color:var(--blue);cursor:pointer;" onclick="localStorage.removeItem('${HIDDEN_KEY}');loadJournal();loadAnalyse();">ALLE ANZEIGEN</span>
+        </div>`;
+    }
 
     document.getElementById('upd-j').textContent = new Date().toLocaleTimeString('de-CH');
   } catch(err) {
@@ -866,7 +916,8 @@ async function loadAnalyse() {
   if (needKey()) return;
   try {
     const r = await bybit('/v5/position/closed-pnl', {category:'linear', limit:50});
-    const trades = r.list || [];
+    const allTrades = r.list || [];
+    const trades = getVisibleTrades(allTrades);
 
     if (!trades.length) {
       document.getElementById('stat-wrap').innerHTML = '<div class="empty" style="grid-column:1/-1">KEINE DATEN</div>';
