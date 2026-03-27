@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <title>CryptoSalary</title>
 <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
 <style>
 :root {
   --bg:     #080c10;
@@ -232,21 +233,6 @@ main {
   color: var(--text);
 }
 
-.hide-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-family: 'Space Mono', monospace;
-  font-size: 9px;
-  letter-spacing: 1px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  margin-top: 8px;
-  transition: all 0.2s;
-}
-.hide-btn:hover { border-color: var(--red); color: var(--red); }
-
 .card-line {
   height: 2px;
   border-radius: 1px;
@@ -391,6 +377,125 @@ select.cfg-input {
   color: var(--muted);
 }
 
+/* ── CHART MODAL ── */
+.chart-modal {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: rgba(0,0,0,0.85);
+  backdrop-filter: blur(8px);
+  padding: 16px;
+  flex-direction: column;
+  gap: 12px;
+}
+.chart-modal.open { display: flex; }
+
+.chart-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.chart-modal-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chart-modal-close {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted2);
+  font-size: 18px;
+  width: 32px; height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.chart-tf-row {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.chart-tf-btn {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  color: var(--muted2);
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  padding: 5px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  letter-spacing: 1px;
+  transition: all 0.15s;
+}
+.chart-tf-btn.active { background: rgba(0,229,160,0.12); border-color: var(--green); color: var(--green); }
+
+.chart-levels {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.chart-level-item {
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chart-level-dot {
+  width: 10px; height: 3px;
+  border-radius: 2px;
+}
+
+#chart-container {
+  flex: 1;
+  min-height: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg2);
+}
+
+.chart-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-family: 'Space Mono', monospace;
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 2px;
+  animation: blink 1.2s infinite;
+}
+
+.chart-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--muted2);
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  letter-spacing: 1px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-top: 6px;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.chart-btn:hover { border-color: var(--blue); color: var(--blue); }
+
 /* ── LOADING / EMPTY ── */
 .loading, .empty {
   text-align: center;
@@ -504,6 +609,29 @@ select.cfg-input {
 
 </main>
 
+<!-- CHART MODAL -->
+<div id="chart-modal" class="chart-modal">
+  <div class="chart-modal-header">
+    <div class="chart-modal-title">
+      <span id="chart-symbol">—</span>
+      <span id="chart-direction-badge" class="badge">—</span>
+    </div>
+    <button class="chart-modal-close" onclick="closeChart()">✕</button>
+  </div>
+  <div class="chart-tf-row">
+    <button class="chart-tf-btn active" onclick="switchTf('15',this)">15m</button>
+    <button class="chart-tf-btn" onclick="switchTf('30',this)">30m</button>
+    <button class="chart-tf-btn" onclick="switchTf('60',this)">1h</button>
+    <button class="chart-tf-btn" onclick="switchTf('240',this)">4h</button>
+  </div>
+  <div class="chart-levels">
+    <div class="chart-level-item"><div class="chart-level-dot" style="background:#00e5a0"></div><span style="color:#00e5a0">Entry</span><span id="lbl-entry" style="color:var(--muted2);margin-left:4px">—</span></div>
+    <div class="chart-level-item"><div class="chart-level-dot" style="background:#ff3d6e"></div><span style="color:#ff3d6e">SL</span><span id="lbl-sl" style="color:var(--muted2);margin-left:4px">—</span></div>
+    <div class="chart-level-item"><div class="chart-level-dot" style="background:#3d9eff"></div><span style="color:#3d9eff">TP</span><span id="lbl-tp" style="color:var(--muted2);margin-left:4px">—</span></div>
+  </div>
+  <div id="chart-container"><div class="chart-loading">LOADING CHART...</div></div>
+</div>
+
 <!-- BOTTOM NAV -->
 <nav class="bottom-nav">
   <button class="nav-item active" onclick="showTab('trades',this)">
@@ -569,11 +697,18 @@ async function hmac(secret, msg) {
 }
 
 async function bybit(path, params = {}) {
-  // Route through server proxy to avoid timestamp drift and CORS issues.
-  // The proxy signs requests with the server's correct clock.
-  const PROXY = 'https://crypto-salary.duckdns.org';
-  const qs = new URLSearchParams({path, ...params}).toString();
-  const res = await fetch(`${PROXY}/bybit?${qs}`);
+  const ts = Date.now().toString();
+  const rw = '5000';
+  const qs = new URLSearchParams(params).toString();
+  const sig = await hmac(SEC, `${ts}${KEY}${rw}${qs}`);
+  const res = await fetch(`https://api.bybit.com${path}?${qs}`, {
+    headers: {
+      'X-BAPI-API-KEY': KEY,
+      'X-BAPI-SIGN': sig,
+      'X-BAPI-TIMESTAMP': ts,
+      'X-BAPI-RECV-WINDOW': rw,
+    }
+  });
   const d = await res.json();
   if (d.retCode !== 0) throw new Error(d.retMsg);
   return d.result;
@@ -611,7 +746,7 @@ async function loadTrades() {
     const pos  = (pr.list||[]).filter(p => parseFloat(p.size||0) > 0);
     const ords = (or.list||[]).filter(o => o.stopOrderType==='Stop' && (o.reduceOnly===false||o.reduceOnly==='false'));
     const used = pos.length + ords.length;
-    const max  = 3;
+    const max  = 4;
 
     // Slots
     let sh = '<div class="slots">';
@@ -642,7 +777,10 @@ async function loadTrades() {
             <div><div class="card-label">Take TP</div><div class="card-val g">${fp(p.takeProfit)}</div></div>
             <div><div class="card-label">Unreal. PnL</div><div class="card-val ${pc(pnl)}">${pnl>=0?'+':''}${pnl.toFixed(3)} USDT</div></div>
           </div>
-          <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-top:8px;">${p.leverage}x Isolated</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+            <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">${p.leverage}x Isolated</span>
+            <button class="chart-btn" onclick="openChart('${p.symbol}','${p.side==='Buy'?'long':'short'}',${parseFloat(p.avgPrice)},${parseFloat(p.stopLoss||0)},${parseFloat(p.takeProfit||0)})">📈 CHART</button>
+          </div>
         </div>`;
       }).join('');
     }
@@ -668,7 +806,10 @@ async function loadTrades() {
             <div><div class="card-label">Take TP</div><div class="card-val g">${fp(o.takeProfit)}</div></div>
             <div><div class="card-label">Value</div><div class="card-val m">${parseFloat(o.leavesValue||0).toFixed(1)} USDT</div></div>
           </div>
-          <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-top:8px;">${ft(o.createdTime)}</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+            <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">${ft(o.createdTime)}</span>
+            <button class="chart-btn" onclick="openChart('${o.symbol}','${o.side==='Buy'?'long':'short'}',${parseFloat(o.triggerPrice)},${parseFloat(o.stopLoss||0)},${parseFloat(o.takeProfit||0)})">📈 CHART</button>
+          </div>
         </div>`;
       }).join('');
     }
@@ -679,26 +820,6 @@ async function loadTrades() {
     document.getElementById('pos-wrap').innerHTML = '<div class="empty">FEHLER</div>';
     document.getElementById('ord-wrap').innerHTML = '<div class="empty">FEHLER</div>';
   }
-}
-
-// ── HIDDEN TRADES (LocalStorage) ──
-const HIDDEN_KEY = 'cs_hidden_trades';
-
-function getHidden() {
-  try { return JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]'); }
-  catch { return []; }
-}
-
-function hideTradeId(id) {
-  const h = getHidden();
-  if (!h.includes(id)) { h.push(id); localStorage.setItem(HIDDEN_KEY, JSON.stringify(h)); }
-  loadJournal();
-  loadAnalyse();
-}
-
-function getVisibleTrades(trades) {
-  const h = getHidden();
-  return trades.filter(t => !h.includes(t.orderId || t.createdTime));
 }
 
 // ── JOURNAL ──
@@ -716,41 +837,22 @@ async function loadJournal() {
       return;
     }
 
-    const visible = getVisibleTrades(trades);
-    const hiddenCount = trades.length - visible.length;
-
-    if (!visible.length) {
-      document.getElementById('jnl-wrap').innerHTML = '<div class="empty">KEINE ABGESCHLOSSENEN TRADES</div>';
-    } else {
-      document.getElementById('jnl-wrap').innerHTML = visible.map(t => {
-        const pnl = parseFloat(t.closedPnl||0);
-        const isL = t.side === 'Buy';
-        const tid = t.orderId || t.createdTime;
-        return `<div class="card">
-          <div class="card-top">
-            <span class="card-sym">${t.symbol}</span>
-            <span class="card-pnl ${pc(pnl)}">${pnl>=0?'+':''}${pnl.toFixed(4)} USDT</span>
-          </div>
-          <div class="card-row">
-            <div><div class="card-label">Side</div><div class="card-val ${isL?'g':'r'}">${isL?'▲ LONG':'▼ SHORT'}</div></div>
-            <div><div class="card-label">Entry</div><div class="card-val">${fp(t.avgEntryPrice)}</div></div>
-            <div><div class="card-label">Exit</div><div class="card-val">${fp(t.avgExitPrice)}</div></div>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
-            <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">${ft(t.updatedTime)}</span>
-            <button class="hide-btn" onclick="hideTradeId('${tid}')">✕ AUSBLENDEN</button>
-          </div>
-        </div>`;
-      }).join('');
-    }
-
-    if (hiddenCount > 0) {
-      document.getElementById('jnl-wrap').innerHTML +=
-        `<div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);text-align:center;margin-top:8px;">
-          ${hiddenCount} Trade(s) ausgeblendet ·
-          <span style="color:var(--blue);cursor:pointer;" onclick="localStorage.removeItem('${HIDDEN_KEY}');loadJournal();loadAnalyse();">ALLE ANZEIGEN</span>
-        </div>`;
-    }
+    document.getElementById('jnl-wrap').innerHTML = trades.map(t => {
+      const pnl = parseFloat(t.closedPnl||0);
+      const isL = t.side === 'Buy';
+      return `<div class="card">
+        <div class="card-top">
+          <span class="card-sym">${t.symbol}</span>
+          <span class="card-pnl ${pc(pnl)}">${pnl>=0?'+':''}${pnl.toFixed(4)} USDT</span>
+        </div>
+        <div class="card-row">
+          <div><div class="card-label">Side</div><div class="card-val ${isL?'g':'r'}">${isL?'▲ LONG':'▼ SHORT'}</div></div>
+          <div><div class="card-label">Entry</div><div class="card-val">${fp(t.avgEntryPrice)}</div></div>
+          <div><div class="card-label">Exit</div><div class="card-val">${fp(t.avgExitPrice)}</div></div>
+        </div>
+        <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;">${ft(t.updatedTime)}</div>
+      </div>`;
+    }).join('');
 
     document.getElementById('upd-j').textContent = new Date().toLocaleTimeString('de-CH');
   } catch(err) {
@@ -764,8 +866,7 @@ async function loadAnalyse() {
   if (needKey()) return;
   try {
     const r = await bybit('/v5/position/closed-pnl', {category:'linear', limit:50});
-    const allTrades = r.list || [];
-    const trades = getVisibleTrades(allTrades);
+    const trades = r.list || [];
 
     if (!trades.length) {
       document.getElementById('stat-wrap').innerHTML = '<div class="empty" style="grid-column:1/-1">KEINE DATEN</div>';
@@ -866,6 +967,151 @@ function drawEq(data) {
   ctx.fillStyle='rgba(74,96,128,0.9)'; ctx.font='9px Space Mono'; ctx.textAlign='right';
   ctx.fillText(max.toFixed(2),pad-2,pad+4); ctx.fillText(min.toFixed(2),pad-2,h-pad+4);
 }
+
+// ── CHART ──
+let chartInstance   = null;
+let chartSeries     = null;
+let chartUpperBB    = null;
+let chartMiddleBB   = null;
+let chartLowerBB    = null;
+let currentSymbol   = null;
+let currentEntry    = 0;
+let currentSL       = 0;
+let currentTP       = 0;
+let currentTf       = '15';
+let entryLine       = null;
+let slLine          = null;
+let tpLine          = null;
+
+function openChart(symbol, direction, entry, sl, tp) {
+  currentSymbol  = symbol;
+  currentEntry   = entry;
+  currentSL      = sl;
+  currentTP      = tp;
+  currentTf      = '15';
+
+  document.getElementById('chart-symbol').textContent = symbol;
+  const badge = document.getElementById('chart-direction-badge');
+  badge.textContent  = direction === 'long' ? '▲ LONG' : '▼ SHORT';
+  badge.className    = 'badge ' + (direction === 'long' ? 'b-long' : 'b-short');
+
+  document.getElementById('lbl-entry').textContent = fp(entry);
+  document.getElementById('lbl-sl').textContent    = fp(sl);
+  document.getElementById('lbl-tp').textContent    = fp(tp);
+
+  // Reset TF buttons
+  document.querySelectorAll('.chart-tf-btn').forEach((b,i) => b.classList.toggle('active', i===0));
+
+  document.getElementById('chart-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  loadChart(symbol, '15', entry, sl, tp);
+}
+
+function closeChart() {
+  document.getElementById('chart-modal').classList.remove('open');
+  document.body.style.overflow = '';
+  if (chartInstance) { chartInstance.remove(); chartInstance = null; }
+}
+
+function switchTf(tf, btn) {
+  currentTf = tf;
+  document.querySelectorAll('.chart-tf-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (chartInstance) { chartInstance.remove(); chartInstance = null; }
+  loadChart(currentSymbol, tf, currentEntry, currentSL, currentTP);
+}
+
+async function loadChart(symbol, interval, entry, sl, tp) {
+  const container = document.getElementById('chart-container');
+  container.innerHTML = '<div class="chart-loading">LOADING CHART...</div>';
+
+  try {
+    // Fetch candles from Bybit public API (no key needed)
+    const res = await fetch(
+      `https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=${interval}&limit=200`
+    );
+    const data = await res.json();
+    const raw  = (data.result?.list || []).reverse(); // oldest first
+
+    if (!raw.length) { container.innerHTML = '<div class="chart-loading">KEINE DATEN</div>'; return; }
+
+    // Parse candles
+    const candles = raw.map(c => ({
+      time:  Math.floor(parseInt(c[0]) / 1000),
+      open:  parseFloat(c[1]),
+      high:  parseFloat(c[2]),
+      low:   parseFloat(c[3]),
+      close: parseFloat(c[4]),
+    }));
+
+    // Compute Bollinger Bands (20, 2)
+    const bbData = computeBB(candles, 20, 2);
+
+    // Create chart
+    container.innerHTML = '';
+    chartInstance = LightweightCharts.createChart(container, {
+      width:  container.clientWidth,
+      height: container.clientHeight || 300,
+      layout: { background: { color: '#0d1219' }, textColor: '#6b85a0' },
+      grid:   { vertLines: { color: '#1e2d3d' }, horzLines: { color: '#1e2d3d' } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      timeScale: { borderColor: '#1e2d3d', timeVisible: true },
+      rightPriceScale: { borderColor: '#1e2d3d' },
+    });
+
+    // Candlestick series
+    chartSeries = chartInstance.addCandlestickSeries({
+      upColor:   '#00e5a0', downColor: '#ff3d6e',
+      borderUpColor: '#00e5a0', borderDownColor: '#ff3d6e',
+      wickUpColor:   '#00e5a0', wickDownColor:   '#ff3d6e',
+    });
+    chartSeries.setData(candles);
+
+    // Bollinger Bands
+    chartUpperBB  = chartInstance.addLineSeries({ color: 'rgba(61,158,255,0.5)',  lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    chartMiddleBB = chartInstance.addLineSeries({ color: 'rgba(107,133,160,0.4)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false, lineStyle: 1 });
+    chartLowerBB  = chartInstance.addLineSeries({ color: 'rgba(61,158,255,0.5)',  lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    chartUpperBB.setData(bbData.upper);
+    chartMiddleBB.setData(bbData.middle);
+    chartLowerBB.setData(bbData.lower);
+
+    // Price lines for Entry, SL, TP
+    if (entry > 0) chartSeries.createPriceLine({ price: entry, color: '#00e5a0', lineWidth: 1, lineStyle: 1, title: 'Entry' });
+    if (sl > 0)    chartSeries.createPriceLine({ price: sl,    color: '#ff3d6e', lineWidth: 1, lineStyle: 2, title: 'SL' });
+    if (tp > 0)    chartSeries.createPriceLine({ price: tp,    color: '#3d9eff', lineWidth: 1, lineStyle: 2, title: 'TP' });
+
+    chartInstance.timeScale().fitContent();
+
+    // Handle resize
+    const ro = new ResizeObserver(() => {
+      if (chartInstance) chartInstance.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+    });
+    ro.observe(container);
+
+  } catch(err) {
+    container.innerHTML = `<div class="chart-loading">FEHLER: ${err.message}</div>`;
+  }
+}
+
+function computeBB(candles, period, mult) {
+  const upper = [], middle = [], lower = [];
+  for (let i = period - 1; i < candles.length; i++) {
+    const slice  = candles.slice(i - period + 1, i + 1);
+    const closes = slice.map(c => c.close);
+    const mean   = closes.reduce((a,b) => a+b, 0) / period;
+    const variance = closes.reduce((a,b) => a + (b-mean)**2, 0) / period;
+    const std    = Math.sqrt(variance);
+    const t      = candles[i].time;
+    upper.push( { time: t, value: mean + mult * std });
+    middle.push({ time: t, value: mean });
+    lower.push( { time: t, value: mean - mult * std });
+  }
+  return { upper, middle, lower };
+}
+
+// Close chart on ESC
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeChart(); });
 
 // ── AUTO REFRESH ──
 function setupRefresh() {
