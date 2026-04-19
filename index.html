@@ -478,20 +478,6 @@ select.cfg-input {
   animation: blink 1.2s infinite;
 }
 
-.hide-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-family: 'Space Mono', monospace;
-  font-size: 9px;
-  letter-spacing: 1px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-.hide-btn:hover { border-color: var(--red); color: var(--red); }
-
 .chart-btn {
   background: none;
   border: 1px solid var(--border);
@@ -836,23 +822,6 @@ async function loadTrades() {
   }
 }
 
-// ── HIDDEN TRADES ──
-const HIDDEN_KEY = 'cs_hidden_trades';
-function getHidden() {
-  try { return JSON.parse(localStorage.getItem(HIDDEN_KEY) || '[]'); }
-  catch { return []; }
-}
-function hideTradeId(id) {
-  const h = getHidden();
-  if (!h.includes(id)) { h.push(id); localStorage.setItem(HIDDEN_KEY, JSON.stringify(h)); }
-  loadJournal();
-  loadAnalyse();
-}
-function getVisibleTrades(trades) {
-  const h = getHidden();
-  return trades.filter(t => !h.includes(t.orderId || t.createdTime));
-}
-
 // ── JOURNAL ──
 async function loadJournal() {
   hideErr('err-j');
@@ -868,41 +837,60 @@ async function loadJournal() {
       return;
     }
 
-    const visible = getVisibleTrades(trades);
-    const hiddenCount = trades.length - visible.length;
+    // Load hidden trade IDs from localStorage
+    const hiddenKey = 'cs_hidden_trades';
+    let hidden = JSON.parse(localStorage.getItem(hiddenKey) || '[]');
+    const visible  = trades.filter(t => !hidden.includes(t.orderId));
+    const hiddenCt = trades.length - visible.length;
 
-    if (!visible.length) {
-      document.getElementById('jnl-wrap').innerHTML = '<div class="empty">KEINE ABGESCHLOSSENEN TRADES</div>';
-    } else {
-      document.getElementById('jnl-wrap').innerHTML = visible.map(t => {
-        const pnl = parseFloat(t.closedPnl||0);
-        const isL = t.side === 'Buy';
-        const tid = t.orderId || t.createdTime;
-        return `<div class="card">
+    function renderJournal() {
+      const cards = visible.map(t => {
+        const pnl  = parseFloat(t.closedPnl||0);
+        const isL  = t.side === 'Sell';
+        const entry = parseFloat(t.avgEntryPrice||0);
+        const exit  = parseFloat(t.avgExitPrice||0);
+        return `<div class="card" id="jcard-${t.orderId}">
           <div class="card-top">
             <span class="card-sym">${t.symbol}</span>
             <span class="card-pnl ${pc(pnl)}">${pnl>=0?'+':''}${pnl.toFixed(4)} USDT</span>
           </div>
           <div class="card-row">
             <div><div class="card-label">Side</div><div class="card-val ${isL?'g':'r'}">${isL?'▲ LONG':'▼ SHORT'}</div></div>
-            <div><div class="card-label">Entry</div><div class="card-val">${fp(t.avgEntryPrice)}</div></div>
-            <div><div class="card-label">Exit</div><div class="card-val">${fp(t.avgExitPrice)}</div></div>
+            <div><div class="card-label">Entry</div><div class="card-val">${fp(entry)}</div></div>
+            <div><div class="card-label">Exit</div><div class="card-val">${fp(exit)}</div></div>
           </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
             <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">${ft(t.updatedTime)}</span>
-            <button class="hide-btn" onclick="hideTradeId('${tid}')">✕ AUSBLENDEN</button>
+            <div style="display:flex;gap:6px;">
+              <button class="chart-btn" onclick="openChartClosed('${t.symbol}','${isL?'long':'short'}',${entry},${exit})">📈 CHART</button>
+              <button class="chart-btn" style="color:var(--red);border-color:rgba(255,61,110,0.3);" onclick="hideJournalTrade('${t.orderId}')">✕ AUSBLENDEN</button>
+            </div>
           </div>
         </div>`;
       }).join('');
+
+      const footer = hiddenCt > 0
+        ? `<div style="text-align:center;font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);padding:12px;">
+            ${hiddenCt} Trade(s) ausgeblendet · <span style="color:var(--green);cursor:pointer;" onclick="showAllJournal()">ALLE ANZEIGEN</span>
+           </div>`
+        : '';
+
+      document.getElementById('jnl-wrap').innerHTML = cards + footer;
     }
 
-    if (hiddenCount > 0) {
-      document.getElementById('jnl-wrap').innerHTML +=
-        `<div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);text-align:center;margin-top:8px;">
-          ${hiddenCount} Trade(s) ausgeblendet ·
-          <span style="color:var(--blue);cursor:pointer;" onclick="localStorage.removeItem('${HIDDEN_KEY}');loadJournal();loadAnalyse();">ALLE ANZEIGEN</span>
-        </div>`;
-    }
+    window.hideJournalTrade = function(orderId) {
+      hidden.push(orderId);
+      localStorage.setItem(hiddenKey, JSON.stringify(hidden));
+      const card = document.getElementById('jcard-' + orderId);
+      if (card) card.remove();
+    };
+
+    window.showAllJournal = function() {
+      localStorage.removeItem(hiddenKey);
+      loadJournal();
+    };
+
+    renderJournal();
 
     document.getElementById('upd-j').textContent = new Date().toLocaleTimeString('de-CH');
   } catch(err) {
@@ -917,7 +905,10 @@ async function loadAnalyse() {
   try {
     const r = await bybit('/v5/position/closed-pnl', {category:'linear', limit:50});
     const allTrades = r.list || [];
-    const trades = getVisibleTrades(allTrades);
+
+    // Filter hidden trades — same as Journal
+    const hidden = JSON.parse(localStorage.getItem('cs_hidden_trades') || '[]');
+    const trades = allTrades.filter(t => !hidden.includes(t.orderId));
 
     if (!trades.length) {
       document.getElementById('stat-wrap').innerHTML = '<div class="empty" style="grid-column:1/-1">KEINE DATEN</div>';
@@ -1034,12 +1025,15 @@ let entryLine       = null;
 let slLine          = null;
 let tpLine          = null;
 
+let currentIsClosed = false;
+
 function openChart(symbol, direction, entry, sl, tp) {
   currentSymbol  = symbol;
   currentEntry   = entry;
   currentSL      = sl;
   currentTP      = tp;
   currentTf      = '15';
+  currentIsClosed = false;
 
   document.getElementById('chart-symbol').textContent = symbol;
   const badge = document.getElementById('chart-direction-badge');
@@ -1050,13 +1044,36 @@ function openChart(symbol, direction, entry, sl, tp) {
   document.getElementById('lbl-sl').textContent    = fp(sl);
   document.getElementById('lbl-tp').textContent    = fp(tp);
 
-  // Reset TF buttons
   document.querySelectorAll('.chart-tf-btn').forEach((b,i) => b.classList.toggle('active', i===0));
-
   document.getElementById('chart-modal').classList.add('open');
   document.body.style.overflow = 'hidden';
 
-  loadChart(symbol, '15', entry, sl, tp);
+  loadChart(symbol, '15', entry, sl, tp, false);
+}
+
+// Chart für abgeschlossene Trades — Entry + Exit Linie
+function openChartClosed(symbol, direction, entry, exit) {
+  currentSymbol   = symbol;
+  currentEntry    = entry;
+  currentSL       = 0;
+  currentTP       = exit;
+  currentTf       = '15';
+  currentIsClosed = true;
+
+  document.getElementById('chart-symbol').textContent = symbol;
+  const badge = document.getElementById('chart-direction-badge');
+  badge.textContent = direction === 'long' ? '▲ LONG' : '▼ SHORT';
+  badge.className   = 'badge ' + (direction === 'long' ? 'b-long' : 'b-short');
+
+  document.getElementById('lbl-entry').textContent = fp(entry);
+  document.getElementById('lbl-sl').textContent    = '—';
+  document.getElementById('lbl-tp').textContent    = fp(exit) + ' (Exit)';
+
+  document.querySelectorAll('.chart-tf-btn').forEach((b,i) => b.classList.toggle('active', i===0));
+  document.getElementById('chart-modal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+
+  loadChart(symbol, '15', entry, 0, exit, true);
 }
 
 function closeChart() {
@@ -1070,10 +1087,10 @@ function switchTf(tf, btn) {
   document.querySelectorAll('.chart-tf-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   if (chartInstance) { chartInstance.remove(); chartInstance = null; }
-  loadChart(currentSymbol, tf, currentEntry, currentSL, currentTP);
+  loadChart(currentSymbol, tf, currentEntry, currentSL, currentTP, currentIsClosed);
 }
 
-async function loadChart(symbol, interval, entry, sl, tp) {
+async function loadChart(symbol, interval, entry, sl, tp, isClosedTrade = false) {
   const container = document.getElementById('chart-container');
   container.innerHTML = '<div class="chart-loading">LOADING CHART...</div>';
 
@@ -1127,10 +1144,10 @@ async function loadChart(symbol, interval, entry, sl, tp) {
     chartMiddleBB.setData(bbData.middle);
     chartLowerBB.setData(bbData.lower);
 
-    // Price lines for Entry, SL, TP
+    // Price lines for Entry, SL, TP / Exit
     if (entry > 0) chartSeries.createPriceLine({ price: entry, color: '#00e5a0', lineWidth: 1, lineStyle: 1, title: 'Entry' });
     if (sl > 0)    chartSeries.createPriceLine({ price: sl,    color: '#ff3d6e', lineWidth: 1, lineStyle: 2, title: 'SL' });
-    if (tp > 0)    chartSeries.createPriceLine({ price: tp,    color: '#3d9eff', lineWidth: 1, lineStyle: 2, title: 'TP' });
+    if (tp > 0)    chartSeries.createPriceLine({ price: tp,    color: isClosedTrade ? '#ffc947' : '#3d9eff', lineWidth: 1, lineStyle: 2, title: isClosedTrade ? 'Exit' : 'TP' });
 
     chartInstance.timeScale().fitContent();
 
