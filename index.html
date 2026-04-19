@@ -519,6 +519,72 @@ select.cfg-input {
 }
 
 /* colors */
+/* ── SCANNER ── */
+.scanner-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.scanner-card:active { border-color: var(--green); }
+.scanner-card-left { flex: 1; min-width: 0; }
+.scanner-sym { font-size: 14px; font-weight: 700; }
+.scanner-funding {
+  font-family: 'Space Mono', monospace;
+  font-size: 9px;
+  margin-top: 3px;
+}
+.scanner-bars {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 2;
+}
+.scanner-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.scanner-bar-label {
+  font-family: 'Space Mono', monospace;
+  font-size: 8px;
+  color: var(--muted);
+  width: 28px;
+  flex-shrink: 0;
+}
+.scanner-bar-bg {
+  flex: 1;
+  height: 4px;
+  background: var(--bg3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.scanner-bar-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s;
+}
+.scanner-bar-val {
+  font-family: 'Space Mono', monospace;
+  font-size: 8px;
+  color: var(--muted2);
+  width: 36px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.scanner-signal {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
 .g { color: var(--green); }
 .r { color: var(--red); }
 .y { color: var(--yellow); }
@@ -575,6 +641,17 @@ select.cfg-input {
     <div class="chart-wrap"><canvas id="eqchart" height="140"></canvas></div>
     <div class="sec">P&L pro Symbol</div>
     <div id="sym-wrap"><div class="loading">—</div></div>
+  </div>
+
+  <!-- SCANNER -->
+  <div id="tab-scanner" class="tab">
+    <div id="err-sc" class="err-bar"></div>
+    <div class="ref-row">
+      <span class="upd-txt" id="upd-sc">—</span>
+      <button class="btn btn-out btn-sm" onclick="loadScanner()">↻ REFRESH</button>
+    </div>
+    <div class="sec">Top 20 Coins nach Signal-Potential</div>
+    <div id="sc-wrap"><div class="loading">SCANNING...</div></div>
   </div>
 
   <!-- CONFIG -->
@@ -644,6 +721,11 @@ select.cfg-input {
     <span>JOURNAL</span>
     <span class="icon-dot"></span>
   </button>
+  <button class="nav-item" onclick="showTab('scanner',this)">
+    <span class="icon">🔍</span>
+    <span>SCANNER</span>
+    <span class="icon-dot"></span>
+  </button>
   <button class="nav-item" onclick="showTab('analyse',this)">
     <span class="icon">📈</span>
     <span>ANALYSE</span>
@@ -685,6 +767,7 @@ function showTab(name, btn) {
   btn.classList.add('active');
   if (name === 'trades')  loadTrades();
   if (name === 'journal') loadJournal();
+  if (name === 'scanner') loadScanner();
   if (name === 'analyse') loadAnalyse();
 }
 
@@ -837,60 +920,24 @@ async function loadJournal() {
       return;
     }
 
-    // Load hidden trade IDs from localStorage
-    const hiddenKey = 'cs_hidden_trades';
-    let hidden = JSON.parse(localStorage.getItem(hiddenKey) || '[]');
-    const visible  = trades.filter(t => !hidden.includes(t.orderId));
-    const hiddenCt = trades.length - visible.length;
-
-    function renderJournal() {
-      const cards = visible.map(t => {
-        const pnl  = parseFloat(t.closedPnl||0);
-        const isL  = t.side === 'Sell';
-        const entry = parseFloat(t.avgEntryPrice||0);
-        const exit  = parseFloat(t.avgExitPrice||0);
-        return `<div class="card" id="jcard-${t.orderId}">
-          <div class="card-top">
-            <span class="card-sym">${t.symbol}</span>
-            <span class="card-pnl ${pc(pnl)}">${pnl>=0?'+':''}${pnl.toFixed(4)} USDT</span>
-          </div>
-          <div class="card-row">
-            <div><div class="card-label">Side</div><div class="card-val ${isL?'g':'r'}">${isL?'▲ LONG':'▼ SHORT'}</div></div>
-            <div><div class="card-label">Entry</div><div class="card-val">${fp(entry)}</div></div>
-            <div><div class="card-label">Exit</div><div class="card-val">${fp(exit)}</div></div>
-          </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
-            <span style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);">${ft(t.updatedTime)}</span>
-            <div style="display:flex;gap:6px;">
-              <button class="chart-btn" onclick="openChartClosed('${t.symbol}','${isL?'long':'short'}',${entry},${exit})">📈 CHART</button>
-              <button class="chart-btn" style="color:var(--red);border-color:rgba(255,61,110,0.3);" onclick="hideJournalTrade('${t.orderId}')">✕ AUSBLENDEN</button>
-            </div>
-          </div>
-        </div>`;
-      }).join('');
-
-      const footer = hiddenCt > 0
-        ? `<div style="text-align:center;font-family:'Space Mono',monospace;font-size:10px;color:var(--muted);padding:12px;">
-            ${hiddenCt} Trade(s) ausgeblendet · <span style="color:var(--green);cursor:pointer;" onclick="showAllJournal()">ALLE ANZEIGEN</span>
-           </div>`
-        : '';
-
-      document.getElementById('jnl-wrap').innerHTML = cards + footer;
-    }
-
-    window.hideJournalTrade = function(orderId) {
-      hidden.push(orderId);
-      localStorage.setItem(hiddenKey, JSON.stringify(hidden));
-      const card = document.getElementById('jcard-' + orderId);
-      if (card) card.remove();
-    };
-
-    window.showAllJournal = function() {
-      localStorage.removeItem(hiddenKey);
-      loadJournal();
-    };
-
-    renderJournal();
+    document.getElementById('jnl-wrap').innerHTML = trades.map(t => {
+      const pnl = parseFloat(t.closedPnl||0);
+      // In closed-pnl, 'side' is the CLOSING side (Buy = closed a Short, Sell = closed a Long)
+      // So we invert: Buy closing = was a SHORT trade, Sell closing = was a LONG trade
+      const isL = t.side === 'Sell';
+      return `<div class="card">
+        <div class="card-top">
+          <span class="card-sym">${t.symbol}</span>
+          <span class="card-pnl ${pc(pnl)}">${pnl>=0?'+':''}${pnl.toFixed(4)} USDT</span>
+        </div>
+        <div class="card-row">
+          <div><div class="card-label">Side</div><div class="card-val ${isL?'g':'r'}">${isL?'▲ LONG':'▼ SHORT'}</div></div>
+          <div><div class="card-label">Entry</div><div class="card-val">${fp(t.avgEntryPrice)}</div></div>
+          <div><div class="card-label">Exit</div><div class="card-val">${fp(t.avgExitPrice)}</div></div>
+        </div>
+        <div style="font-family:'Space Mono',monospace;font-size:9px;color:var(--muted);margin-top:6px;">${ft(t.updatedTime)}</div>
+      </div>`;
+    }).join('');
 
     document.getElementById('upd-j').textContent = new Date().toLocaleTimeString('de-CH');
   } catch(err) {
@@ -904,11 +951,7 @@ async function loadAnalyse() {
   if (needKey()) return;
   try {
     const r = await bybit('/v5/position/closed-pnl', {category:'linear', limit:50});
-    const allTrades = r.list || [];
-
-    // Filter hidden trades — same as Journal
-    const hidden = JSON.parse(localStorage.getItem('cs_hidden_trades') || '[]');
-    const trades = allTrades.filter(t => !hidden.includes(t.orderId));
+    const trades = r.list || [];
 
     if (!trades.length) {
       document.getElementById('stat-wrap').innerHTML = '<div class="empty" style="grid-column:1/-1">KEINE DATEN</div>';
@@ -1025,15 +1068,12 @@ let entryLine       = null;
 let slLine          = null;
 let tpLine          = null;
 
-let currentIsClosed = false;
-
 function openChart(symbol, direction, entry, sl, tp) {
   currentSymbol  = symbol;
   currentEntry   = entry;
   currentSL      = sl;
   currentTP      = tp;
   currentTf      = '15';
-  currentIsClosed = false;
 
   document.getElementById('chart-symbol').textContent = symbol;
   const badge = document.getElementById('chart-direction-badge');
@@ -1044,36 +1084,13 @@ function openChart(symbol, direction, entry, sl, tp) {
   document.getElementById('lbl-sl').textContent    = fp(sl);
   document.getElementById('lbl-tp').textContent    = fp(tp);
 
+  // Reset TF buttons
   document.querySelectorAll('.chart-tf-btn').forEach((b,i) => b.classList.toggle('active', i===0));
+
   document.getElementById('chart-modal').classList.add('open');
   document.body.style.overflow = 'hidden';
 
-  loadChart(symbol, '15', entry, sl, tp, false);
-}
-
-// Chart für abgeschlossene Trades — Entry + Exit Linie
-function openChartClosed(symbol, direction, entry, exit) {
-  currentSymbol   = symbol;
-  currentEntry    = entry;
-  currentSL       = 0;
-  currentTP       = exit;
-  currentTf       = '15';
-  currentIsClosed = true;
-
-  document.getElementById('chart-symbol').textContent = symbol;
-  const badge = document.getElementById('chart-direction-badge');
-  badge.textContent = direction === 'long' ? '▲ LONG' : '▼ SHORT';
-  badge.className   = 'badge ' + (direction === 'long' ? 'b-long' : 'b-short');
-
-  document.getElementById('lbl-entry').textContent = fp(entry);
-  document.getElementById('lbl-sl').textContent    = '—';
-  document.getElementById('lbl-tp').textContent    = fp(exit) + ' (Exit)';
-
-  document.querySelectorAll('.chart-tf-btn').forEach((b,i) => b.classList.toggle('active', i===0));
-  document.getElementById('chart-modal').classList.add('open');
-  document.body.style.overflow = 'hidden';
-
-  loadChart(symbol, '15', entry, 0, exit, true);
+  loadChart(symbol, '15', entry, sl, tp);
 }
 
 function closeChart() {
@@ -1087,10 +1104,10 @@ function switchTf(tf, btn) {
   document.querySelectorAll('.chart-tf-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   if (chartInstance) { chartInstance.remove(); chartInstance = null; }
-  loadChart(currentSymbol, tf, currentEntry, currentSL, currentTP, currentIsClosed);
+  loadChart(currentSymbol, tf, currentEntry, currentSL, currentTP);
 }
 
-async function loadChart(symbol, interval, entry, sl, tp, isClosedTrade = false) {
+async function loadChart(symbol, interval, entry, sl, tp) {
   const container = document.getElementById('chart-container');
   container.innerHTML = '<div class="chart-loading">LOADING CHART...</div>';
 
@@ -1144,10 +1161,10 @@ async function loadChart(symbol, interval, entry, sl, tp, isClosedTrade = false)
     chartMiddleBB.setData(bbData.middle);
     chartLowerBB.setData(bbData.lower);
 
-    // Price lines for Entry, SL, TP / Exit
+    // Price lines for Entry, SL, TP
     if (entry > 0) chartSeries.createPriceLine({ price: entry, color: '#00e5a0', lineWidth: 1, lineStyle: 1, title: 'Entry' });
     if (sl > 0)    chartSeries.createPriceLine({ price: sl,    color: '#ff3d6e', lineWidth: 1, lineStyle: 2, title: 'SL' });
-    if (tp > 0)    chartSeries.createPriceLine({ price: tp,    color: isClosedTrade ? '#ffc947' : '#3d9eff', lineWidth: 1, lineStyle: 2, title: isClosedTrade ? 'Exit' : 'TP' });
+    if (tp > 0)    chartSeries.createPriceLine({ price: tp,    color: '#3d9eff', lineWidth: 1, lineStyle: 2, title: 'TP' });
 
     chartInstance.timeScale().fitContent();
 
@@ -1181,6 +1198,179 @@ function computeBB(candles, period, mult) {
 // Close chart on ESC
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeChart(); });
 
+// ── SCANNER ──
+const WHITELIST = [
+  'BTCUSDT','ETHUSDT','SOLUSDT','XRPUSDT','BNBUSDT',
+  'ADAUSDT','AVAXUSDT','DOGEUSDT','LTCUSDT','TRXUSDT',
+  'NEARUSDT','DOTUSDT','ATOMUSDT','APTUSDT','SUIUSDT',
+  'SEIUSDT','TONUSDT','LINKUSDT','UNIUSDT','AAVEUSDT',
+  'MKRUSDT','LDOUSDT','CRVUSDT','INJUSDT','ARBUSDT',
+  'OPUSDT','MATICUSDT','FILUSDT','FETUSDT','RENDERUSDT',
+  'TAOUSDT','XLMUSDT','XMRUSDT','ZECUSDT','RUNEUSDT',
+  'ICPUSDT','HBARUSDT','IMXUSDT','STXUSDT','WLDUSDT',
+];
+
+function computeBBForScanner(candles, period, mult) {
+  const result = [];
+  for (let i = period - 1; i < candles.length; i++) {
+    const slice  = candles.slice(i - period + 1, i + 1);
+    const closes = slice.map(c => c.close);
+    const mean   = closes.reduce((a,b) => a+b,0) / period;
+    const std    = Math.sqrt(closes.reduce((a,b) => a+(b-mean)**2,0) / period);
+    result.push({ mean, upper: mean + mult*std, lower: mean - mult*std });
+  }
+  return result;
+}
+
+function computeEMAForScanner(candles, period) {
+  const k = 2 / (period + 1);
+  let ema = null;
+  return candles.map(c => {
+    ema = ema === null ? c.close : c.close * k + ema * (1 - k);
+    return ema;
+  });
+}
+
+async function fetchTickerFunding(symbols) {
+  try {
+    const res  = await fetch('https://api.bybit.com/v5/market/tickers?category=linear');
+    const data = await res.json();
+    const map  = {};
+    for (const t of (data.result?.list || [])) {
+      if (symbols.includes(t.symbol)) {
+        map[t.symbol] = {
+          funding:   parseFloat(t.fundingRate || '0'),
+          turnover:  parseFloat(t.turnover24h || '0'),
+        };
+      }
+    }
+    return map;
+  } catch { return {}; }
+}
+
+async function fetchCandles15m(symbol) {
+  try {
+    const res  = await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=15&limit=50`);
+    const data = await res.json();
+    return (data.result?.list || []).reverse().map(c => ({
+      time:  parseInt(c[0]),
+      open:  parseFloat(c[1]),
+      high:  parseFloat(c[2]),
+      low:   parseFloat(c[3]),
+      close: parseFloat(c[4]),
+    }));
+  } catch { return []; }
+}
+
+async function loadScanner() {
+  hideErr('err-sc');
+  document.getElementById('sc-wrap').innerHTML = '<div class="loading">SCANNING 40 COINS...</div>';
+
+  try {
+    // Fetch funding for all whitelist coins
+    const fundingMap = await fetchTickerFunding(WHITELIST);
+
+    // Score each coin
+    const scored = [];
+    for (const symbol of WHITELIST) {
+      const f = fundingMap[symbol];
+      if (!f) continue;
+
+      const fundingAbs = Math.abs(f.funding);
+      if (fundingAbs < 0.00005) continue; // min funding filter
+      if (f.turnover < 5_000_000) continue; // min volume filter
+
+      const candles = await fetchCandles15m(symbol);
+      if (candles.length < 25) continue;
+
+      const bbs  = computeBBForScanner(candles, 20, 2);
+      const emas = computeEMAForScanner(candles, 8);
+
+      const lastCandle = candles[candles.length - 1];
+      const lastBB     = bbs[bbs.length - 1];
+      const lastEMA    = emas[emas.length - 1];
+
+      if (!lastBB || !lastEMA) continue;
+
+      const direction = f.funding > 0 ? 'short' : 'long';
+
+      // BB distance: how close is price to the relevant band?
+      const bbDist = direction === 'long'
+        ? (lastCandle.close - lastBB.lower) / lastBB.lower * 100
+        : (lastBB.upper - lastCandle.close) / lastCandle.close * 100;
+
+      // EMA distance
+      const emaDist = Math.abs(lastCandle.close - lastEMA) / lastEMA * 100;
+
+      // Score: lower BB dist = better, EMA in sweet spot 0.2-1.0% = better
+      const bbScore      = Math.max(0, 100 - bbDist * 10);
+      const emaInSweet   = emaDist >= 0.2 && emaDist <= 1.0;
+      const fundingScore = Math.min(100, fundingAbs * 10000);
+      const totalScore   = bbScore * 0.5 + fundingScore * 0.3 + (emaInSweet ? 20 : 0);
+
+      // Signal strength
+      let signal = 'weak';
+      if (bbDist < 2 && emaInSweet && fundingAbs > 0.0001) signal = 'strong';
+      else if (bbDist < 5 && fundingAbs > 0.00005) signal = 'medium';
+
+      scored.push({ symbol, direction, funding: f.funding, fundingAbs, bbDist, emaDist, emaInSweet, signal, totalScore, lastCandle, lastBB, lastEMA });
+    }
+
+    // Sort by score, take top 20
+    scored.sort((a,b) => b.totalScore - a.totalScore);
+    const top20 = scored.slice(0, 20);
+
+    if (!top20.length) {
+      document.getElementById('sc-wrap').innerHTML = '<div class="empty">KEINE COINS GEFUNDEN</div>';
+      return;
+    }
+
+    document.getElementById('sc-wrap').innerHTML = top20.map(s => {
+      const isLong    = s.direction === 'long';
+      const sigColor  = s.signal === 'strong' ? 'var(--green)' : s.signal === 'medium' ? 'var(--yellow)' : 'var(--muted)';
+      const sigLabel  = s.signal === 'strong' ? '🟢' : s.signal === 'medium' ? '🟡' : '⚪';
+      const fundColor = isLong ? 'var(--green)' : 'var(--red)';
+      const bbFill    = Math.max(0, Math.min(100, 100 - s.bbDist * 8));
+      const emaFill   = s.emaInSweet ? 80 : Math.max(0, Math.min(100, s.emaDist * 50));
+      const emaColor  = s.emaInSweet ? 'var(--green)' : 'var(--yellow)';
+
+      return `<div class="scanner-card" onclick="openChart('${s.symbol}','${s.direction}',${s.lastCandle.close},0,0)">
+        <div class="scanner-card-left">
+          <div class="scanner-sym">${s.symbol.replace('USDT','')}</div>
+          <div class="scanner-funding" style="color:${fundColor}">
+            ${isLong ? '▲ LONG' : '▼ SHORT'} · ${(s.funding*100).toFixed(4)}%
+          </div>
+        </div>
+        <div class="scanner-bars">
+          <div class="scanner-bar-row">
+            <span class="scanner-bar-label">BB</span>
+            <div class="scanner-bar-bg">
+              <div class="scanner-bar-fill" style="width:${bbFill}%;background:${fundColor}"></div>
+            </div>
+            <span class="scanner-bar-val">${s.bbDist.toFixed(1)}%</span>
+          </div>
+          <div class="scanner-bar-row">
+            <span class="scanner-bar-label">EMA</span>
+            <div class="scanner-bar-bg">
+              <div class="scanner-bar-fill" style="width:${emaFill}%;background:${emaColor}"></div>
+            </div>
+            <span class="scanner-bar-val">${s.emaDist.toFixed(2)}%</span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex-shrink:0;">
+          <span style="font-size:16px;">${sigLabel}</span>
+          <span style="font-family:'Space Mono',monospace;font-size:8px;color:var(--muted);">📈</span>
+        </div>
+      </div>`;
+    }).join('');
+
+    document.getElementById('upd-sc').textContent = new Date().toLocaleTimeString('de-CH');
+  } catch(err) {
+    showErr('err-sc', err.message);
+    document.getElementById('sc-wrap').innerHTML = '<div class="empty">FEHLER</div>';
+  }
+}
+
 // ── AUTO REFRESH ──
 function setupRefresh() {
   if(timer) clearInterval(timer);
@@ -1189,6 +1379,7 @@ function setupRefresh() {
     const a=document.querySelector('.tab.active')?.id?.replace('tab-','');
     if(a==='trades') loadTrades();
     if(a==='journal') loadJournal();
+    if(a==='scanner') loadScanner();
     if(a==='analyse') loadAnalyse();
   }, iv*1000);
 }
