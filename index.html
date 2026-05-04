@@ -663,6 +663,9 @@ select.cfg-input {
     <div class="chart-level-item"><div class="chart-level-dot" style="background:#00e5a0"></div><span style="color:#00e5a0">Entry</span><span id="lbl-entry" style="color:var(--muted2);margin-left:4px">—</span></div>
     <div class="chart-level-item"><div class="chart-level-dot" style="background:#ff3d6e"></div><span style="color:#ff3d6e">SL</span><span id="lbl-sl" style="color:var(--muted2);margin-left:4px">—</span></div>
     <div class="chart-level-item"><div class="chart-level-dot" style="background:#3d9eff"></div><span style="color:#3d9eff">TP</span><span id="lbl-tp" style="color:var(--muted2);margin-left:4px">—</span></div>
+    <div class="chart-level-item"><div class="chart-level-dot" style="background:#00e5a0"></div><span style="color:var(--muted2)">DI+</span></div>
+    <div class="chart-level-item"><div class="chart-level-dot" style="background:#ff3d6e"></div><span style="color:var(--muted2)">DI-</span></div>
+    <div class="chart-level-item"><div class="chart-level-dot" style="background:#ffc947"></div><span style="color:var(--muted2)">ADX</span></div>
   </div>
   <div id="chart-container"><div class="chart-loading">LOADING CHART...</div></div>
 </div>
@@ -1106,39 +1109,73 @@ function computeEMAScanner(candles, period) {
 
 async function loadScanner() {
   hideErr('err-sc');
-  document.getElementById('sc-wrap').innerHTML = '<div class="loading">SCANNING 40 COINS...</div>';
+  document.getElementById('sc-wrap').innerHTML = '<div class="loading">SCANNING...</div>';
   try {
     const res  = await fetch('https://api.bybit.com/v5/market/tickers?category=linear');
     const data = await res.json();
     const tickers = data.result?.list || [];
     const fundMap = {};
     for (const t of tickers) {
-      if (WHITELIST.includes(t.symbol)) {
-        fundMap[t.symbol] = { funding: parseFloat(t.fundingRate||'0'), turnover: parseFloat(t.turnover24h||'0') };
-      }
+      fundMap[t.symbol] = { funding: parseFloat(t.fundingRate||'0'), turnover: parseFloat(t.turnover24h||'0') };
     }
 
     const scored = [];
-    for (const symbol of WHITELIST) {
+    const allSymbols = Object.keys(fundMap).filter(s => s.endsWith('USDT'));
+
+    for (const symbol of allSymbols) {
       const f = fundMap[symbol];
       if (!f || Math.abs(f.funding) < 0.00005 || f.turnover < 5_000_000) continue;
-      const r2  = await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=15&limit=50`);
-      const d2  = await r2.json();
-      const raw = (d2.result?.list||[]).reverse().map(c=>({close:parseFloat(c[4]),high:parseFloat(c[2]),low:parseFloat(c[3])}));
-      if (raw.length < 25) continue;
-      const bbs  = computeBBScanner(raw, 20, 2);
-      const emas = computeEMAScanner(raw, 8);
-      const last = raw[raw.length-1];
+
+      // Fetch 4h candles for ADX
+      const r4h = await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=240&limit=60`);
+      const d4h = await r4h.json();
+      const raw4h = (d4h.result?.list||[]).reverse().map(c=>({
+        close: parseFloat(c[4]), high: parseFloat(c[2]), low: parseFloat(c[3])
+      }));
+      if (raw4h.length < 30) continue;
+
+      // Fetch 15m candles for BB
+      const r15 = await fetch(`https://api.bybit.com/v5/market/kline?category=linear&symbol=${symbol}&interval=15&limit=50`);
+      const d15 = await r15.json();
+      const raw15 = (d15.result?.list||[]).reverse().map(c=>({
+        close: parseFloat(c[4]), high: parseFloat(c[2]), low: parseFloat(c[3])
+      }));
+      if (raw15.length < 25) continue;
+
+      // Compute ADX on 4h
+      const adxResult = computeADX(raw4h, 14);
+      let latestADX = null;
+      for (let i = adxResult.adx.length - 1; i >= 0; i--) {
+        if (adxResult.adx[i] !== null && adxResult.adx[i] !== undefined) {
+          latestADX = { adx: adxResult.adx[i], diPlus: adxResult.diPlus[i], diMinus: adxResult.diMinus[i] };
+          break;
+        }
+      }
+      if (!latestADX) continue;
+
+      // Compute BB on 15m
+      const bbs  = computeBBScanner(raw15, 20, 2);
+      const last = raw15[raw15.length-1];
       const bb   = bbs[bbs.length-1];
-      const ema  = emas[emas.length-1];
-      if (!bb || !ema) continue;
-      const dir      = f.funding > 0 ? 'short' : 'long';
-      const bbDist   = dir === 'long' ? (last.close - bb.lower)/bb.lower*100 : (bb.upper - last.close)/last.close*100;
-      const emaDist  = Math.abs(last.close - ema)/ema*100;
-      const emaSweet = emaDist >= 0.2 && emaDist <= 1.0;
-      const score    = Math.max(0,100-bbDist*10)*0.5 + Math.min(100,Math.abs(f.funding)*10000)*0.3 + (emaSweet?20:0);
-      const signal   = bbDist < 2 && emaSweet && Math.abs(f.funding) > 0.0001 ? 'strong' : bbDist < 5 ? 'medium' : 'weak';
-      scored.push({ symbol, dir, funding: f.funding, bbDist, emaDist, emaSweet, signal, score, last, bb });
+      if (!bb) continue;
+
+      const dir    = f.funding > 0 ? 'short' : 'long';
+      const bbDist = dir === 'long' ? (last.close - bb.lower)/bb.lower*100 : (bb.upper - last.close)/last.close*100;
+
+      // ADX trend check
+      const hasTrend  = latestADX.adx > 20;
+      const trendUp   = latestADX.diPlus > latestADX.diMinus;
+      const trendDown = latestADX.diMinus > latestADX.diPlus;
+      const trendOk   = hasTrend && ((dir === 'long' && trendUp) || (dir === 'short' && trendDown));
+
+      // Score: BB closeness + funding strength + ADX trend
+      const score = Math.max(0, 100 - bbDist * 10) * 0.5
+                  + Math.min(100, Math.abs(f.funding) * 10000) * 0.3
+                  + (trendOk ? 20 : 0);
+
+      const signal = trendOk && bbDist < 2 ? 'strong' : trendOk && bbDist < 5 ? 'medium' : 'weak';
+
+      scored.push({ symbol, dir, funding: f.funding, bbDist, adx: latestADX, hasTrend, trendOk, signal, score, last });
     }
 
     scored.sort((a,b) => b.score - a.score);
@@ -1146,11 +1183,15 @@ async function loadScanner() {
     if (!top.length) { document.getElementById('sc-wrap').innerHTML = '<div class="empty">KEINE COINS</div>'; return; }
 
     document.getElementById('sc-wrap').innerHTML = top.map(s => {
-      const isL   = s.dir === 'long';
-      const sig   = s.signal === 'strong' ? '🟢' : s.signal === 'medium' ? '🟡' : '⚪';
-      const col   = isL ? 'var(--green)' : 'var(--red)';
+      const isL    = s.dir === 'long';
+      const col    = isL ? 'var(--green)' : 'var(--red)';
+      const sig    = s.signal === 'strong' ? '🟢' : s.signal === 'medium' ? '🟡' : '⚪';
       const bbFill = Math.max(0, Math.min(100, 100 - s.bbDist * 8));
-      const eFill  = s.emaSweet ? 80 : Math.max(0, Math.min(100, s.emaDist * 50));
+      const adxFill = Math.min(100, s.adx.adx / 50 * 100);
+      const adxCol  = s.hasTrend ? (s.trendOk ? 'var(--green)' : 'var(--red)') : 'var(--yellow)';
+      const adxLabel = s.hasTrend ? (s.trendOk ? '✓ TREND' : '✗ GEGEN') : 'SEITWÄRTS';
+      const diPlusFill  = Math.min(100, s.adx.diPlus / 40 * 100);
+      const diMinusFill = Math.min(100, s.adx.diMinus / 40 * 100);
       return `<div class="scanner-card" onclick="openChart('${s.symbol}','${s.dir}',${s.last.close},0,0)">
         <div class="scanner-card-left">
           <div class="scanner-sym">${s.symbol.replace('USDT','')}</div>
@@ -1163,9 +1204,19 @@ async function loadScanner() {
             <span class="scanner-bar-val">${s.bbDist.toFixed(1)}%</span>
           </div>
           <div class="scanner-bar-row">
-            <span class="scanner-bar-label">EMA</span>
-            <div class="scanner-bar-bg"><div class="scanner-bar-fill" style="width:${eFill}%;background:${s.emaSweet?'var(--green)':'var(--yellow)'}"></div></div>
-            <span class="scanner-bar-val">${s.emaDist.toFixed(2)}%</span>
+            <span class="scanner-bar-label">ADX</span>
+            <div class="scanner-bar-bg"><div class="scanner-bar-fill" style="width:${adxFill}%;background:${adxCol}"></div></div>
+            <span class="scanner-bar-val" style="color:${adxCol}">${s.adx.adx.toFixed(0)} ${adxLabel}</span>
+          </div>
+          <div class="scanner-bar-row">
+            <span class="scanner-bar-label" style="color:var(--green);font-size:9px">DI+</span>
+            <div class="scanner-bar-bg"><div class="scanner-bar-fill" style="width:${diPlusFill}%;background:var(--green)"></div></div>
+            <span class="scanner-bar-val">${s.adx.diPlus.toFixed(0)}</span>
+          </div>
+          <div class="scanner-bar-row">
+            <span class="scanner-bar-label" style="color:var(--red);font-size:9px">DI-</span>
+            <div class="scanner-bar-bg"><div class="scanner-bar-fill" style="width:${diMinusFill}%;background:var(--red)"></div></div>
+            <span class="scanner-bar-val">${s.adx.diMinus.toFixed(0)}</span>
           </div>
         </div>
         <span style="font-size:16px;flex-shrink:0;">${sig}</span>
@@ -1180,6 +1231,7 @@ async function loadScanner() {
 
 // ── AUTO REFRESH ──
 let chartSeries     = null;
+let adxChartInstance = null;
 let chartUpperBB    = null;
 let chartMiddleBB   = null;
 let chartLowerBB    = null;
@@ -1196,6 +1248,7 @@ function closeChart() {
   document.getElementById('chart-modal').classList.remove('open');
   document.body.style.overflow = '';
   if (chartInstance) { chartInstance.remove(); chartInstance = null; }
+  if (adxChartInstance) { adxChartInstance.remove(); adxChartInstance = null; }
 }
 
 function switchTf(tf, btn) {
@@ -1203,6 +1256,7 @@ function switchTf(tf, btn) {
   document.querySelectorAll('.chart-tf-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   if (chartInstance) { chartInstance.remove(); chartInstance = null; }
+  if (adxChartInstance) { adxChartInstance.remove(); adxChartInstance = null; }
   loadChart(currentSymbol, tf, currentEntry, currentSL, currentTP, currentIsClosed);
 }
 
@@ -1232,11 +1286,13 @@ async function loadChart(symbol, interval, entry, sl, tp, isClosedTrade = false)
     // Compute Bollinger Bands (20, 2)
     const bbData = computeBB(candles, 20, 2);
 
-    // Create chart
-    container.innerHTML = '';
-    chartInstance = LightweightCharts.createChart(container, {
-      width:  container.clientWidth,
-      height: container.clientHeight || 300,
+    // Create chart containers
+    container.innerHTML = '<div id="chart-main"></div><div id="chart-adx"></div>';
+    const mainContainer = document.getElementById('chart-main');
+    const adxContainer  = document.getElementById('chart-adx');
+    chartInstance = LightweightCharts.createChart(mainContainer, {
+      width:  mainContainer.clientWidth,
+      height: mainContainer.clientHeight || 260,
       layout: { background: { color: '#0d1219' }, textColor: '#6b85a0' },
       grid:   { vertLines: { color: '#1e2d3d' }, horzLines: { color: '#1e2d3d' } },
       crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
@@ -1265,17 +1321,120 @@ async function loadChart(symbol, interval, entry, sl, tp, isClosedTrade = false)
     if (sl > 0)    chartSeries.createPriceLine({ price: sl,    color: '#ff3d6e', lineWidth: 1, lineStyle: 2, title: 'SL' });
     if (tp > 0)    chartSeries.createPriceLine({ price: tp,    color: isClosedTrade ? '#ffc947' : '#3d9eff', lineWidth: 1, lineStyle: 2, title: isClosedTrade ? 'Exit' : 'TP' });
 
+    // ── ADX second chart ──
+    const adxData = computeADX(candles, 14);
+    if (adxChartInstance) { adxChartInstance.remove(); adxChartInstance = null; }
+    adxChartInstance = LightweightCharts.createChart(adxContainer, {
+      width:  adxContainer.clientWidth,
+      height: adxContainer.clientHeight || 100,
+      layout: { background: { color: '#0d1219' }, textColor: '#6b85a0' },
+      grid:   { vertLines: { color: '#1e2d3d' }, horzLines: { color: '#1e2d3d' } },
+      crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      timeScale: { borderColor: '#1e2d3d', timeVisible: true, visible: false },
+      rightPriceScale: { borderColor: '#1e2d3d', scaleMargins: { top: 0.1, bottom: 0.1 } },
+      handleScroll: false, handleScale: false,
+    });
+
+    const diPlusSeries  = adxChartInstance.addLineSeries({ color: 'rgba(0,229,160,0.9)',  lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    const diMinusSeries = adxChartInstance.addLineSeries({ color: 'rgba(255,61,110,0.9)', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+    const adxSeries     = adxChartInstance.addLineSeries({ color: 'rgba(255,201,71,1.0)', lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: 'ADX' });
+    const threshSeries  = adxChartInstance.addLineSeries({ color: 'rgba(107,133,160,0.6)', lineWidth: 1, lineStyle: 2, priceLineVisible: false, lastValueVisible: false });
+
+    const dpData = [], dmData = [], adxLineData = [], threshData = [];
+    for (let i = 0; i < candles.length; i++) {
+      const t = candles[i].time;
+      const dp = adxData.diPlus[i], dm = adxData.diMinus[i], av = adxData.adx[i];
+      if (dp !== null && dp !== undefined) {
+        dpData.push({ time: t, value: dp });
+        dmData.push({ time: t, value: dm });
+        adxLineData.push({ time: t, value: av });
+        threshData.push({ time: t, value: 20 });
+      }
+    }
+    diPlusSeries.setData(dpData);
+    diMinusSeries.setData(dmData);
+    adxSeries.setData(adxLineData);
+    threshSeries.setData(threshData);
+    adxChartInstance.timeScale().fitContent();
+
+    // Sync timescales
+    chartInstance.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (range && adxChartInstance) adxChartInstance.timeScale().setVisibleLogicalRange(range);
+    });
+    adxChartInstance.timeScale().subscribeVisibleLogicalRangeChange(range => {
+      if (range && chartInstance) chartInstance.timeScale().setVisibleLogicalRange(range);
+    });
+
     chartInstance.timeScale().fitContent();
 
     // Handle resize
     const ro = new ResizeObserver(() => {
-      if (chartInstance) chartInstance.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+      if (chartInstance) chartInstance.applyOptions({ width: mainContainer.clientWidth, height: mainContainer.clientHeight });
+      if (adxChartInstance) adxChartInstance.applyOptions({ width: adxContainer.clientWidth, height: adxContainer.clientHeight });
     });
     ro.observe(container);
 
   } catch(err) {
     container.innerHTML = `<div class="chart-loading">FEHLER: ${err.message}</div>`;
   }
+}
+
+
+function computeADX(candles, period = 14) {
+  const n = candles.length;
+  if (n < period * 2) return { diPlus: [], diMinus: [], adx: [] };
+
+  const trArr = [], dmPlusArr = [], dmMinusArr = [];
+  for (let i = 1; i < n; i++) {
+    const curr = candles[i], prev = candles[i-1];
+    const upMove = curr.high - prev.high;
+    const downMove = prev.low - curr.low;
+    const tr = Math.max(curr.high - curr.low, Math.abs(curr.high - prev.close), Math.abs(curr.low - prev.close));
+    trArr.push(tr);
+    dmPlusArr.push(upMove > downMove && upMove > 0 ? upMove : 0);
+    dmMinusArr.push(downMove > upMove && downMove > 0 ? downMove : 0);
+  }
+
+  let smTR = trArr.slice(0, period).reduce((a,b)=>a+b,0);
+  let smPlus = dmPlusArr.slice(0, period).reduce((a,b)=>a+b,0);
+  let smMinus = dmMinusArr.slice(0, period).reduce((a,b)=>a+b,0);
+
+  const diPlusArr = [], diMinusArr = [], dxArr = [];
+  for (let i = period; i < trArr.length; i++) {
+    smTR    = smTR    - smTR/period    + trArr[i];
+    smPlus  = smPlus  - smPlus/period  + dmPlusArr[i];
+    smMinus = smMinus - smMinus/period + dmMinusArr[i];
+    const dp = smTR > 0 ? smPlus/smTR*100 : 0;
+    const dm = smTR > 0 ? smMinus/smTR*100 : 0;
+    diPlusArr.push(dp);
+    diMinusArr.push(dm);
+    const s = dp + dm;
+    dxArr.push(s > 0 ? Math.abs(dp - dm)/s*100 : 0);
+  }
+
+  if (dxArr.length < period) return { diPlus: [], diMinus: [], adx: [], startIdx: 0 };
+  let adxVal = dxArr.slice(0, period).reduce((a,b)=>a+b,0) / period;
+  const startIdx = period * 2;
+  const diPlusOut = [], diMinusOut = [], adxOut = [];
+
+  // Pad with nulls
+  for (let i = 0; i < startIdx; i++) { diPlusOut.push(null); diMinusOut.push(null); adxOut.push(null); }
+
+  diPlusOut.push(diPlusArr[period-1]);
+  diMinusOut.push(diMinusArr[period-1]);
+  adxOut.push(adxVal);
+
+  for (let i = period; i < dxArr.length; i++) {
+    adxVal = (adxVal * (period-1) + dxArr[i]) / period;
+    const ci = startIdx + (i - period);
+    if (ci < n) {
+      diPlusOut.push(diPlusArr[i]);
+      diMinusOut.push(diMinusArr[i]);
+      adxOut.push(adxVal);
+    }
+  }
+
+  return { diPlus: diPlusOut, diMinus: diMinusOut, adx: adxOut };
 }
 
 function computeBB(candles, period, mult) {
